@@ -1,0 +1,65 @@
+version: '3'
+
+services:
+  app:
+    build:
+      context: .
+    image: epos_v1-main
+    container_name: epos_v1-main
+    restart: unless-stopped
+    tty: true
+    environment:
+      SERVICE_NAME: app
+    working_dir: /var/www/epos_v1-main
+    volumes:
+      - .:/var/www/epos_v1-main/
+      - ./storage/php.ini:/usr/local/etc/php/conf.d/local.ini
+    networks:
+      - epos_v1-main
+
+  webserver:
+    image: nginx:alpine
+    container_name: nginx_epos_v1-main
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "2022:80"
+    volumes:
+      - .:/var/www/epos_v1-main
+      - ./storage/:/etc/nginx/conf.d/
+    networks:
+      - epos_v1-main
+
+  db:
+    image: mysql:5.7
+    container_name: db_epos_v1-main
+    restart: always
+    tty: true
+    ports:
+      - "20222:3306"
+    volumes:
+      - lbdata:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: fajri123
+      MYSQL_DATABASE: kasirku
+    networks:
+      - epos_v1-main
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: pma_epos_v1-main
+    links:
+      - db
+    restart: always
+    ports:
+      - "7000:80"
+    networks:
+      - epos_v1-main
+
+networks:
+  epos_v1-main:
+    driver: bridge
+
+volumes:
+  lbdata:
+    driver: local
