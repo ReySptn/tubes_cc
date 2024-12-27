@@ -1,91 +1,62 @@
 pipeline {
     agent any
+
     environment {
-        DOCKER_TAG = ''
+        DOCKER_IMAGE = 'epos_v1-main:${env.DOCKER_TAG}' // Ganti dengan nama dan tag image Docker Anda
+        DISCORD_WEBHOOK = 'https://discord.com/api/webhooks/1322021893892477010/mA6zP8vWIKIOa23mc2uY6cfMuZtHPuFgmThyvzOWtzCT-iQbNXpMsTJSeZPxEOqry_DU'
     }
 
     stages {
-        stage('SCM') { // Checkout repository first
+        stage('Checkout') {
             steps {
-                script {
-                    try {
-                        git credentialsId: 'tubes_cc', 
-                            url: 'https://github.com/ReySptn/tubes_cc.git',
-                            branch: 'main'  // Pastikan menggunakan branch main
-                    } catch (Exception e) {
-                        error "SCM checkout failed: ${e.message}"
-                    }
+                echo 'Melakukan checkout kode...'
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Membangun image Docker...'
+                sh '''
+                    docker build -t $DOCKER_IMAGE .
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                echo 'Mengirim image Docker ke repository...'
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push $DOCKER_IMAGE
+                    '''
                 }
             }
         }
 
-        stage('Set Version') { // Moved after SCM
+        stage('Notify Discord') {
             steps {
+                echo 'Mengirim notifikasi ke Discord...'
                 script {
-                    try {
-                        def commitHash = bat(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                        env.DOCKER_TAG = commitHash
-                    } catch (Exception e) {
-                        error "Failed to get commit hash: ${e.message}"
-                    }
-                }
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                script {
-                    try {
-                        def gdCheck = bat(script: 'php -m | findstr gd', returnStatus: true)
-                        if (gdCheck != 0) {
-                            error "PHP GD extension is not enabled. Enable it in php.ini."
-                        }
-                        bat 'composer install --no-dev --optimize-autoloader'
-                    } catch (Exception e) {
-                        error "Failed to install dependencies: ${e.message}"
-                    }
-                }
-            }
-        }
-
-        stage('Docker Build') {
-            when {
-                expression { currentBuild.result == null }
-            }
-            steps {
-                script {
-                    try {
-                        bat "docker build -t reysptan/epos_v1-main:${env.DOCKER_TAG} ."
-                    } catch (Exception e) {
-                        error "Docker build failed: ${e.message}"
-                    }
+                    def payload = '{"content": "Pipeline berhasil dijalankan! 🎉 Docker image telah dibuat dan di-push: ' + env.DOCKER_IMAGE + '"}'
+                    sh """
+                        curl -H "Content-Type: application/json" -X POST -d '${payload}' ${DISCORD_WEBHOOK}
+                    """
                 }
             }
         }
     }
 
     post {
-        always {
-            echo 'Cleaning up workspace...'
-            cleanWs()
-        }
-        
-        success {
-            echo 'Pipeline executed successfully!'
-            discordSend(
-                description: "🎉 Proses build selesai! Docker image berhasil dibuat dengan tag: ${env.DOCKER_TAG}. 🔧 Lihat detail build di Jenkins untuk informasi lebih lanjut.", 
-                footer: 'Jenkins CI/CD - Build Berhasil', 
-                webhookURL: 'https://discord.com/api/webhooks/1322021893892477010/mA6zP8vWIKIOa23mc2uY6cfMuZtHPuFgmThyvzOWtzCT-iQbNXpMsTJSeZPxEOqry_DU'
-            )
-        }
-
         failure {
-            echo 'Pipeline failed. Check logs for details.'
-            discordSend(
-                description: '❌ Build gagal. Silakan cek detail error di Jenkins untuk penyebab kegagalan. ⚠', 
-                footer: 'Jenkins CI/CD - Build Gagal', 
-                webhookURL: 'https://discord.com/api/webhooks/1322021893892477010/mA6zP8vWIKIOa23mc2uY6cfMuZtHPuFgmThyvzOWtzCT-iQbNXpMsTJSeZPxEOqry_DU'
-            )
+            echo 'Pipeline gagal. Mengirim notifikasi ke Discord...'
+            script {
+                def payload = '{"content": "⚠️ Pipeline gagal! Mohon periksa log error di Jenkins."}'
+                sh """
+                    curl -H "Content-Type: application/json" -X POST -d '${payload}' ${DISCORD_WEBHOOK}
+                """
+            }
         }
     }
 }
